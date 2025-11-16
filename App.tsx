@@ -3,6 +3,7 @@ import type { ExcelFileState } from './types';
 import { runInitialProcessing, assignAndGenerateExcel } from './services/excelProcessor';
 import FileUploader from './components/FileUploader';
 import AssignmentModal from './components/AssignmentModal';
+import Dashboard from './components/Dashboard';
 import { PlayIcon, SpinnerIcon } from './components/Icons';
 
 declare const saveAs: any;
@@ -19,6 +20,9 @@ const App: React.FC = () => {
     const [successMessage, setSuccessMessage] = useState<string | null>(null);
     const [processedDataForAssignment, setProcessedDataForAssignment] = useState<any[] | null>(null);
     const [showAssignmentModal, setShowAssignmentModal] = useState<boolean>(false);
+    const [pivotData, setPivotData] = useState<{ screener: string; count: number }[] | null>(null);
+    const [showDashboard, setShowDashboard] = useState<boolean>(false);
+
 
     const handleFileChange = (fileType: keyof ExcelFileState) => (file: File | null) => {
         setFiles(prev => ({ ...prev, [fileType]: file }));
@@ -31,7 +35,10 @@ const App: React.FC = () => {
         setProcessedDataForAssignment(null);
         setShowAssignmentModal(false);
         setIsAssigning(false);
-        // Keep success/error messages for user feedback
+        setShowDashboard(false);
+        setPivotData(null);
+        setError(null);
+        setSuccessMessage(null);
     };
 
     const handleProcess = useCallback(async () => {
@@ -67,11 +74,14 @@ const App: React.FC = () => {
         setError(null);
 
         try {
-            const excelData = await assignAndGenerateExcel(processedDataForAssignment, cnNames, jpNames, specialNames, generalNames);
-            const blob = new Blob([excelData], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+            const { fileData, pivotData } = await assignAndGenerateExcel(processedDataForAssignment, cnNames, jpNames, specialNames, generalNames);
+            const blob = new Blob([fileData], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
             saveAs(blob, "Assigned_Report.xlsx");
-            setSuccessMessage("Work assigned successfully! Your download has started.");
-            resetState();
+            
+            setPivotData(pivotData);
+            setShowDashboard(true);
+            setShowAssignmentModal(false);
+            setSuccessMessage("Success! Your download has started. See assignment summary below.");
         } catch (e) {
             if (e instanceof Error) {
                 setError(`An error occurred during assignment: ${e.message}`);
@@ -79,6 +89,7 @@ const App: React.FC = () => {
                 setError("An unknown error occurred during assignment.");
             }
              // Keep modal open on error to allow retry
+        } finally {
             setIsAssigning(false);
         }
     };
@@ -102,63 +113,67 @@ const App: React.FC = () => {
                         Automate your data workflow: Process, Assign, and Download.
                     </p>
                 </header>
-
-                <main className="bg-gray-800/50 backdrop-blur-sm rounded-2xl shadow-2xl p-6 sm:p-8 border border-gray-700">
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-                        <FileUploader
-                            id="raw-data"
-                            label="1. Raw Data Sheet"
-                            description="Main data to be assigned."
-                            onFileSelect={handleFileChange('raw')}
-                            fileName={files.raw?.name}
-                        />
-                        <FileUploader
-                            id="info-data"
-                            label="2. Information Sheet"
-                            description="Contains VLOOKUP data."
-                            onFileSelect={handleFileChange('info')}
-                            fileName={files.info?.name}
-                        />
-                        <FileUploader
-                            id="duplicate-data"
-                            label="3. Duplicate Data Sheet"
-                            description="Master Hold Report."
-                            onFileSelect={handleFileChange('duplicate')}
-                            fileName={files.duplicate?.name}
-                        />
+                
+                {error && (
+                    <div className="mb-6 p-4 text-center text-red-300 bg-red-900/50 border border-red-700 rounded-lg">
+                        <strong>Error:</strong> {error}
                     </div>
-
-                    <div className="mt-8 text-center">
-                        <button
-                            onClick={handleProcess}
-                            disabled={!allFilesUploaded || isLoading}
-                            className="w-full sm:w-auto inline-flex items-center justify-center px-8 py-4 font-semibold text-lg text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-4 focus:ring-blue-500/50 transition-all duration-300 ease-in-out shadow-lg transform hover:scale-105"
-                        >
-                            {isLoading ? (
-                                <>
-                                    <SpinnerIcon />
-                                    Processing...
-                                </>
-                            ) : (
-                                <>
-                                    <PlayIcon />
-                                    Process Files
-                                </>
-                            )}
-                        </button>
+                )}
+                {successMessage && !showAssignmentModal && (
+                    <div className="mb-6 p-4 text-center text-green-300 bg-green-900/50 border border-green-700 rounded-lg">
+                        {successMessage}
                     </div>
+                )}
 
-                    {error && (
-                        <div className="mt-6 p-4 text-center text-red-300 bg-red-900/50 border border-red-700 rounded-lg">
-                            <strong>Error:</strong> {error}
+                {showDashboard && pivotData ? (
+                     <Dashboard data={pivotData} onReset={resetState} />
+                ) : (
+                    <main className="bg-gray-800/50 backdrop-blur-sm rounded-2xl shadow-2xl p-6 sm:p-8 border border-gray-700">
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+                            <FileUploader
+                                id="raw-data"
+                                label="1. Raw Data Sheet"
+                                description="Main data to be assigned."
+                                onFileSelect={handleFileChange('raw')}
+                                fileName={files.raw?.name}
+                            />
+                            <FileUploader
+                                id="info-data"
+                                label="2. Information Sheet"
+                                description="Contains VLOOKUP data."
+                                onFileSelect={handleFileChange('info')}
+                                fileName={files.info?.name}
+                            />
+                            <FileUploader
+                                id="duplicate-data"
+                                label="3. Duplicate Data Sheet"
+                                description="Master Hold Report."
+                                onFileSelect={handleFileChange('duplicate')}
+                                fileName={files.duplicate?.name}
+                            />
                         </div>
-                    )}
-                    {successMessage && !showAssignmentModal && (
-                        <div className="mt-6 p-4 text-center text-green-300 bg-green-900/50 border border-green-700 rounded-lg">
-                            {successMessage}
+
+                        <div className="mt-8 text-center">
+                            <button
+                                onClick={handleProcess}
+                                disabled={!allFilesUploaded || isLoading}
+                                className="w-full sm:w-auto inline-flex items-center justify-center px-8 py-4 font-semibold text-lg text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-4 focus:ring-blue-500/50 transition-all duration-300 ease-in-out shadow-lg transform hover:scale-105"
+                            >
+                                {isLoading ? (
+                                    <>
+                                        <SpinnerIcon />
+                                        Processing...
+                                    </>
+                                ) : (
+                                    <>
+                                        <PlayIcon />
+                                        Process Files
+                                    </>
+                                )}
+                            </button>
                         </div>
-                    )}
-                </main>
+                    </main>
+                )}
                  <footer className="text-center mt-8 text-gray-500 text-sm">
                     <p>&copy; {new Date().getFullYear()} TCHUB Assigner. All Rights Reserved.</p>
                 </footer>

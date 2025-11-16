@@ -116,13 +116,8 @@ export const runInitialProcessing = async (rawFile: File, infoFile: File, dupFil
 };
 
 /**
- * Assigns work to screeners and generates the final Excel file.
- * @param processedData - The data array from runInitialProcessing.
- * @param cnAssignees - Array of names for CN tasks.
- * @param jpAssignees - Array of names for JP tasks.
- * @param specialAssignees - Array of names for RU, UA, NI, VE, BY tasks.
- * @param generalAssignees - Array of names for all other tasks.
- * @returns A Uint8Array representing the final .xlsx file.
+ * Assigns work, generates the final Excel file, and calculates pivot data.
+ * @returns An object containing the .xlsx file data and the pivot table data.
  */
 export const assignAndGenerateExcel = async (
     processedData: Row[],
@@ -130,16 +125,18 @@ export const assignAndGenerateExcel = async (
     jpAssignees: string[],
     specialAssignees: string[],
     generalAssignees: string[]
-): Promise<Uint8Array> => {
+): Promise<{ fileData: Uint8Array; pivotData: { screener: string; count: number }[] }> => {
+    
+    // Create a deep copy of the header to avoid mutation issues
+    const header = processedData.length > 0 ? [...processedData[0]] : [];
     if (processedData.length < 2) { // Only header or empty
-        const ws = XLSX.utils.aoa_to_sheet(processedData);
+        const ws = XLSX.utils.aoa_to_sheet([header]);
         const wb = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb, ws, 'Assigned_Data');
         const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
-        return new Uint8Array(wbout);
+        return { fileData: new Uint8Array(wbout), pivotData: [] };
     }
     
-    const header = processedData[0];
     const dataRows = processedData.slice(1);
 
     const dupLookupIndex = header.findIndex((h: string) => h === 'Dup_VLOOKUP');
@@ -154,8 +151,6 @@ export const assignAndGenerateExcel = async (
     if (infoLookupIndex === -1) {
         throw new Error("'Info_VLOOKUP' column not found. Cannot perform assignment.");
     }
-    // Add "Screener" as the first column header
-    header.unshift('Screener');
 
     const cnRows: Row[] = [];
     const jpRows: Row[] = [];
@@ -168,13 +163,13 @@ export const assignAndGenerateExcel = async (
     filteredRows.forEach((row: Row) => {
         const infoValue = row[infoLookupIndex] ? String(row[infoLookupIndex]).toUpperCase() : '';
         if (infoValue.includes('CN')) {
-            cnRows.push(row);
+            cnRows.push([...row]); // copy row to prevent mutation
         } else if (infoValue.includes('JP')) {
-            jpRows.push(row);
+            jpRows.push([...row]);
         } else if (Array.from(specialCodes).some(code => infoValue.includes(code))) {
-            specialRows.push(row);
+            specialRows.push([...row]);
         } else {
-            generalRows.push(row);
+            generalRows.push([...row]);
         }
     });
 
@@ -211,12 +206,29 @@ export const assignAndGenerateExcel = async (
         generalRows.forEach(row => row.unshift('UNASSIGNED_GENERAL'));
     }
     
-    // 4. Combine all categorized and assigned rows
-    const finalAssignedData = [header, ...cnRows, ...jpRows, ...specialRows, ...generalRows];
-    const finalWs = XLSX.utils.aoa_to_sheet(finalAssignedData);
+    // 4. Combine all assigned rows and calculate pivot data
+    const finalAssignedRows = [...cnRows, ...jpRows, ...specialRows, ...generalRows];
+    
+    const screenerCounts = new Map<string, number>();
+    finalAssignedRows.forEach(row => {
+        const screener = row[0] as string;
+        screenerCounts.set(screener, (screenerCounts.get(screener) || 0) + 1);
+    });
+
+    const pivotData = Array.from(screenerCounts.entries()).map(([screener, count]) => ({
+        screener,
+        count
+    })).sort((a, b) => a.screener.localeCompare(b.screener));
+
+    // 5. Prepare final sheet for download
+    header.unshift('Screener');
+    const finalSheetData = [header, ...finalAssignedRows];
+    const finalWs = XLSX.utils.aoa_to_sheet(finalSheetData);
     const finalWb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(finalWb, finalWs, 'Assigned_Data');
 
     const wbout = XLSX.write(finalWb, { bookType: 'xlsx', type: 'array' });
-    return new Uint8Array(wbout);
+    const fileData = new Uint8Array(wbout);
+
+    return { fileData, pivotData };
 };
