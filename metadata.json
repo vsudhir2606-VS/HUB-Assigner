@@ -1,0 +1,5 @@
+{
+  "name": "TCHUB Assigner",
+  "description": "An intelligent tool to automate Excel data processing. Upload three sheets (Raw Data, Information, and Duplicates) to clean, merge, and transform your data for team assignments, then download the final processed report.",
+  "requestFramePermissions": []
+}
