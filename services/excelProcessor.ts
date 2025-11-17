@@ -232,3 +232,35 @@ export const assignAndGenerateExcel = async (
 
     return { fileData, pivotData };
 };
+
+/**
+ * Processes a single Excel file to extract unique numbers from Column A.
+ */
+export const processColumnA = async (file: File): Promise<{ uniqueNumbers: number[] }> => {
+    if (typeof XLSX === 'undefined') {
+        throw new Error('XLSX library is not loaded.');
+    }
+
+    const buffer = await readFileAsArrayBuffer(file);
+    const wb = XLSX.read(buffer, { type: 'array' });
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    if (!ws) throw new Error("File is empty or corrupted.");
+    
+    const data: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null });
+
+    const seen = new Set<number>();
+    // Iterate through all rows, starting from the first row
+    for (let i = 0; i < data.length; i++) {
+        const row = data[i];
+        // Ensure row and cell exist before processing
+        if (row && row.length > 0 && row[0] !== null) {
+            const valA = Number(row[0]);
+            // Check if the conversion to number is successful
+            if (!isNaN(valA)) {
+                seen.add(valA);
+            }
+        }
+    }
+    
+    return { uniqueNumbers: Array.from(seen).sort((a, b) => a - b) };
+};
