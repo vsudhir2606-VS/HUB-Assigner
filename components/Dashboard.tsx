@@ -37,26 +37,26 @@ const Dashboard: React.FC<DashboardProps> = ({ data, onReset }) => {
             <h2 className="text-2xl font-bold mb-6 text-center text-white">Assignment Summary</h2>
             
             <div className="max-w-md mx-auto">
-                <div className="border border-gray-600 rounded-lg overflow-hidden shadow-lg">
-                    <table className="w-full text-left text-sm text-white">
+                <div className="rounded-lg overflow-hidden shadow-lg">
+                    <table className="w-full text-left text-sm text-white border-collapse">
                         <thead className="bg-gray-700 text-gray-300 uppercase tracking-wider">
                             <tr>
-                                <th className="px-4 py-3 font-semibold">Row Label</th>
-                                <th className="px-4 py-3 font-semibold text-right">Count of Screener</th>
+                                <th scope="col" className="px-4 py-3 font-bold border border-gray-600">Row Label</th>
+                                <th scope="col" className="px-4 py-3 font-bold text-right border border-gray-600">Count of Screener</th>
                             </tr>
                         </thead>
-                        <tbody className="bg-gray-800 divide-y divide-gray-700">
+                        <tbody className="bg-gray-800">
                             {data.map(({ screener, count }) => (
                                 <tr key={screener}>
-                                    <td className="px-4 py-2 font-medium">{screener}</td>
-                                    <td className="px-4 py-2 text-right font-mono">{count}</td>
+                                    <td className="px-4 py-2 font-medium border border-gray-600">{screener}</td>
+                                    <td className="px-4 py-2 text-right font-mono border border-gray-600">{count}</td>
                                 </tr>
                             ))}
                         </tbody>
-                        <tfoot className="bg-blue-900/50 font-bold">
+                        <tfoot className="bg-gray-700 font-bold">
                             <tr>
-                                <td className="px-4 py-2">Grand Total</td>
-                                <td className="px-4 py-2 text-right font-mono">{total}</td>
+                                <td className="px-4 py-2 border border-gray-600">Grand Total</td>
+                                <td className="px-4 py-2 text-right font-mono border border-gray-600">{total}</td>
                             </tr>
                         </tfoot>
                     </table>

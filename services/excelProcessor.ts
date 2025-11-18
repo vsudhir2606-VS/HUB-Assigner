@@ -11,12 +11,13 @@ const readFileAsArrayBuffer = (file: File): Promise<ArrayBuffer> => {
 };
 
 type Row = any[];
+type ZraxFilter = 'NONE' | 'ZOP' | 'OZ';
 
 /**
  * Performs the initial data processing: reads files, cleans raw data, and performs VLOOKUPs.
  * Returns the processed data as an array of arrays, ready for the assignment step.
  */
-export const runInitialProcessing = async (rawFile: File, infoFile: File, dupFile: File): Promise<Row[]> => {
+export const runInitialProcessing = async (rawFile: File, infoFile: File, dupFile: File, zraxFilter: ZraxFilter): Promise<Row[]> => {
     // This function processes the three uploaded Excel files.
     // - rawFile: Corresponds to "Excel 1", the main data sheet.
     // - infoFile: Corresponds to "Excel 2", the information sheet for the first VLOOKUP.
@@ -42,7 +43,16 @@ export const runInitialProcessing = async (rawFile: File, infoFile: File, dupFil
     if (!rawWs) throw new Error("Raw Data file is empty or corrupted.");
     let rawData: Row[] = XLSX.utils.sheet_to_json(rawWs, { header: 1, defval: "" });
 
-    // 2.1. Convert Col A to numbers and remove duplicates
+    // 2.1. Apply "Only ZRAX" (OZ) filter if selected
+    if (zraxFilter === 'OZ') {
+        const headerRow = rawData.length > 0 ? rawData[0] : [];
+        const dataRows = rawData.length > 1 ? rawData.slice(1) : [];
+        // Column Z is at index 25 in the original raw data
+        const zraxOnlyData = dataRows.filter(row => row[25] === 'ZRAX');
+        rawData = [headerRow, ...zraxOnlyData];
+    }
+
+    // 2.2. Convert Col A to numbers and remove duplicates
     const seen = new Set<number>();
     const uniqueData: Row[] = [];
     const header = rawData.length > 0 ? rawData[0] : [];
@@ -59,10 +69,10 @@ export const runInitialProcessing = async (rawFile: File, infoFile: File, dupFil
     }
     rawData = uniqueData;
 
-    // 2.2. Delete columns B, C, D, E, F, G (indices 1 to 6)
+    // 2.3. Delete columns B, C, D, E, F, G (indices 1 to 6)
     rawData = rawData.map(row => [row[0], ...row.slice(7)]);
 
-    // 2.3. Rename Col H (now at index 1) to "CTR"
+    // 2.4. Rename Col H (now at index 1) to "CTR"
     if (rawData.length > 0 && rawData[0].length > 1) {
         rawData[0][1] = 'CTR';
     }
@@ -124,7 +134,8 @@ export const assignAndGenerateExcel = async (
     cnAssignees: string[],
     jpAssignees: string[],
     specialAssignees: string[],
-    generalAssignees: string[]
+    generalAssignees: string[],
+    zraxFilter: ZraxFilter
 ): Promise<{ fileData: Uint8Array; pivotData: { screener: string; count: number }[] }> => {
     
     // Create a deep copy of the header to avoid mutation issues
@@ -147,68 +158,60 @@ export const assignAndGenerateExcel = async (
     // 1. Filter rows to keep only those with '#N/A' in 'Dup_VLOOKUP'
     const filteredRows = dataRows.filter(row => row[dupLookupIndex] === '#N/A');
 
-    const infoLookupIndex = header.findIndex((h: string) => h === 'Info_VLOOKUP');
-    if (infoLookupIndex === -1) {
-        throw new Error("'Info_VLOOKUP' column not found. Cannot perform assignment.");
-    }
+    // Helper function to categorize and assign a given set of rows
+    const processAndAssign = (rowsToAssign: Row[]): Row[] => {
+        const infoLookupIndex = header.findIndex((h: string) => h === 'Info_VLOOKUP');
+        if (infoLookupIndex === -1) throw new Error("'Info_VLOOKUP' column not found.");
+        
+        const cnRows: Row[] = [], jpRows: Row[] = [], specialRows: Row[] = [], generalRows: Row[] = [];
+        const specialCodes = new Set(['RU', 'UA', 'NI', 'VE', 'BY', 'CU', 'IR', 'KP', 'SY']);
 
-    const cnRows: Row[] = [];
-    const jpRows: Row[] = [];
-    const specialRows: Row[] = [];
-    const generalRows: Row[] = [];
+        rowsToAssign.forEach((row: Row) => {
+            const infoValue = row[infoLookupIndex] ? String(row[infoLookupIndex]).toUpperCase() : '';
+            if (infoValue.includes('CN')) cnRows.push([...row]);
+            else if (infoValue.includes('JP')) jpRows.push([...row]);
+            else if (Array.from(specialCodes).some(code => infoValue.includes(code))) specialRows.push([...row]);
+            else generalRows.push([...row]);
+        });
+
+        if (cnAssignees.length > 0) cnRows.forEach((row, index) => row.unshift(cnAssignees[index % cnAssignees.length]));
+        else cnRows.forEach(row => row.unshift('UNASSIGNED_CN'));
+
+        if (jpAssignees.length > 0) jpRows.forEach((row, index) => row.unshift(jpAssignees[index % jpAssignees.length]));
+        else jpRows.forEach(row => row.unshift('UNASSIGNED_JP'));
+
+        if (specialAssignees.length > 0) specialRows.forEach((row, index) => row.unshift(specialAssignees[index % specialAssignees.length]));
+        else specialRows.forEach(row => row.unshift('UNASSIGNED_SPECIAL'));
+
+        if (generalAssignees.length > 0) generalRows.forEach((row, index) => row.unshift(generalAssignees[index % generalAssignees.length]));
+        else generalRows.forEach(row => row.unshift('UNASSIGNED_GENERAL'));
+
+        return [...cnRows, ...jpRows, ...specialRows, ...generalRows];
+    };
     
-    const specialCodes = new Set(['RU', 'UA', 'NI', 'VE', 'BY']);
+    let finalAssignedRows: Row[];
 
-    // 2. Categorize rows based on 'Info_VLOOKUP' value
-    filteredRows.forEach((row: Row) => {
-        const infoValue = row[infoLookupIndex] ? String(row[infoLookupIndex]).toUpperCase() : '';
-        if (infoValue.includes('CN')) {
-            cnRows.push([...row]); // copy row to prevent mutation
-        } else if (infoValue.includes('JP')) {
-            jpRows.push([...row]);
-        } else if (Array.from(specialCodes).some(code => infoValue.includes(code))) {
-            specialRows.push([...row]);
-        } else {
-            generalRows.push([...row]);
-        }
-    });
-
-    // 3. Assign work for each category, adding the name to the beginning of the row
-    if (cnAssignees.length > 0) {
-        cnRows.forEach((row, index) => {
-            row.unshift(cnAssignees[index % cnAssignees.length]);
+    if (zraxFilter === 'ZOP') {
+        const zColIndex = 19; // Original Col Z (index 25) is now at 19 after removing B-G (6 cols)
+        const zraxRows: Row[] = [];
+        const otherRows: Row[] = [];
+        
+        filteredRows.forEach(row => {
+            // Ensure the row has enough columns to prevent errors
+            if (row.length > zColIndex && row[zColIndex] === 'ZRAX') {
+                zraxRows.push(row);
+            } else {
+                otherRows.push(row);
+            }
         });
+
+        const assignedZrax = processAndAssign(zraxRows);
+        const assignedOthers = processAndAssign(otherRows);
+        finalAssignedRows = [...assignedZrax, ...assignedOthers];
     } else {
-        cnRows.forEach(row => row.unshift('UNASSIGNED_CN'));
+        finalAssignedRows = processAndAssign(filteredRows);
     }
 
-    if (jpAssignees.length > 0) {
-        jpRows.forEach((row, index) => {
-            row.unshift(jpAssignees[index % jpAssignees.length]);
-        });
-    } else {
-        jpRows.forEach(row => row.unshift('UNASSIGNED_JP'));
-    }
-
-    if (specialAssignees.length > 0) {
-        specialRows.forEach((row, index) => {
-            row.unshift(specialAssignees[index % specialAssignees.length]);
-        });
-    } else {
-        specialRows.forEach(row => row.unshift('UNASSIGNED_SPECIAL'));
-    }
-
-    if (generalAssignees.length > 0) {
-        generalRows.forEach((row, index) => {
-            row.unshift(generalAssignees[index % generalAssignees.length]);
-        });
-    } else {
-        generalRows.forEach(row => row.unshift('UNASSIGNED_GENERAL'));
-    }
-    
-    // 4. Combine all assigned rows and calculate pivot data
-    const finalAssignedRows = [...cnRows, ...jpRows, ...specialRows, ...generalRows];
-    
     const screenerCounts = new Map<string, number>();
     finalAssignedRows.forEach(row => {
         const screener = row[0] as string;
@@ -221,9 +224,42 @@ export const assignAndGenerateExcel = async (
     })).sort((a, b) => a.screener.localeCompare(b.screener));
 
     // 5. Prepare final sheet for download
+    
+    // 5.1. Find and remove the 'CTR' column
+    const ctrIndex = header.findIndex((h: string) => h === 'CTR');
+    if (ctrIndex !== -1) {
+        // Remove from the original header array
+        header.splice(ctrIndex, 1);
+        
+        // Remove from each assigned data row. The original columns are shifted by 1 due to 'Screener'
+        finalAssignedRows.forEach(row => {
+            row.splice(ctrIndex + 1, 1);
+        });
+    }
+
+    // 5.2. Prepend 'Screener' to the modified header
     header.unshift('Screener');
     const finalSheetData = [header, ...finalAssignedRows];
+
+    // 5.3. Create worksheet and apply header styling
     const finalWs = XLSX.utils.aoa_to_sheet(finalSheetData);
+
+    const headerStyle = {
+        font: { bold: true, color: { rgb: "FFFFFFFF" } },
+        fill: { patternType: "solid", fgColor: { rgb: "FF4F46E5" } } // Blue background to match UI
+    };
+
+    const range = XLSX.utils.decode_range(finalWs['!ref']);
+    if (range && range.e.r >= 0) { // Check if there's at least one row (the header)
+        for (let C = range.s.c; C <= range.e.c; ++C) {
+            const cellAddress = XLSX.utils.encode_cell({ r: 0, c: C });
+            const cell = finalWs[cellAddress];
+            if (cell) {
+                cell.s = headerStyle;
+            }
+        }
+    }
+    
     const finalWb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(finalWb, finalWs, 'Assigned_Data');
 

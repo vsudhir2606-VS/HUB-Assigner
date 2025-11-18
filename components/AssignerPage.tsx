@@ -22,7 +22,7 @@ const AssignerPage: React.FC = () => {
     const [showAssignmentModal, setShowAssignmentModal] = useState<boolean>(false);
     const [pivotData, setPivotData] = useState<{ screener: string; count: number }[] | null>(null);
     const [showDashboard, setShowDashboard] = useState<boolean>(false);
-
+    const [zraxFilter, setZraxFilter] = useState<'NONE' | 'ZOP' | 'OZ'>('NONE');
 
     const handleFileChange = (fileType: keyof ExcelFileState) => (file: File | null) => {
         setFiles(prev => ({ ...prev, [fileType]: file }));
@@ -39,6 +39,7 @@ const AssignerPage: React.FC = () => {
         setPivotData(null);
         setError(null);
         setSuccessMessage(null);
+        setZraxFilter('NONE');
     };
 
     const handleProcess = useCallback(async () => {
@@ -52,7 +53,7 @@ const AssignerPage: React.FC = () => {
         setSuccessMessage(null);
 
         try {
-            const processedData = await runInitialProcessing(files.raw, files.info, files.duplicate);
+            const processedData = await runInitialProcessing(files.raw, files.info, files.duplicate, zraxFilter);
             setProcessedDataForAssignment(processedData);
             setShowAssignmentModal(true);
             setSuccessMessage("Step 1 Complete: Data processed. Now assign screeners.");
@@ -65,7 +66,7 @@ const AssignerPage: React.FC = () => {
         } finally {
             setIsLoading(false);
         }
-    }, [files]);
+    }, [files, zraxFilter]);
 
     const handleFinalizeDownload = async (cnNames: string[], jpNames: string[], specialNames: string[], generalNames: string[]) => {
         if (!processedDataForAssignment) return;
@@ -74,7 +75,7 @@ const AssignerPage: React.FC = () => {
         setError(null);
 
         try {
-            const { fileData, pivotData } = await assignAndGenerateExcel(processedDataForAssignment, cnNames, jpNames, specialNames, generalNames);
+            const { fileData, pivotData } = await assignAndGenerateExcel(processedDataForAssignment, cnNames, jpNames, specialNames, generalNames, zraxFilter);
             const blob = new Blob([fileData], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
             saveAs(blob, "Assigned_Report.xlsx");
             
@@ -100,6 +101,18 @@ const AssignerPage: React.FC = () => {
         setSuccessMessage(null);
     };
     
+    const handleZraxFilterChange = (filter: 'ZOP' | 'OZ') => {
+        setZraxFilter(prev => (prev === filter ? 'NONE' : filter));
+    };
+
+    const getFilterButtonClasses = (filter: 'ZOP' | 'OZ') => `
+        px-3 py-1 text-xs font-bold rounded-full transition-colors duration-200 border-2 
+        ${zraxFilter === filter
+            ? 'bg-purple-600 border-purple-500 text-white shadow-lg'
+            : 'bg-gray-700/50 border-gray-600 text-gray-300 hover:bg-gray-600'
+        }
+    `;
+
     const allFilesUploaded = files.raw && files.info && files.duplicate;
 
     return (
@@ -152,11 +165,27 @@ const AssignerPage: React.FC = () => {
                         />
                     </div>
 
-                    <div className="mt-8 text-center">
+                    <div className="mt-8 flex flex-col sm:flex-row justify-center items-center gap-4">
+                        <div className="flex items-center gap-2 p-2 bg-gray-900/50 border border-gray-700 rounded-full order-1 sm:order-2">
+                            <button
+                                onClick={() => handleZraxFilterChange('ZOP')}
+                                className={getFilterButtonClasses('ZOP')}
+                                title="Prioritize 'ZRAX' rows from Column Z"
+                            >
+                                ZOP
+                            </button>
+                            <button
+                                onClick={() => handleZraxFilterChange('OZ')}
+                                className={getFilterButtonClasses('OZ')}
+                                title="Process ONLY 'ZRAX' rows from Column Z"
+                            >
+                                OZ
+                            </button>
+                        </div>
                         <button
                             onClick={handleProcess}
                             disabled={!allFilesUploaded || isLoading}
-                            className="w-full sm:w-auto inline-flex items-center justify-center px-8 py-4 font-semibold text-lg text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-4 focus:ring-blue-500/50 transition-all duration-300 ease-in-out shadow-lg transform hover:scale-105"
+                            className="w-full sm:w-auto inline-flex items-center justify-center px-8 py-4 font-semibold text-lg text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-4 focus:ring-blue-500/50 transition-all duration-300 ease-in-out shadow-lg transform hover:scale-105 order-2 sm:order-1"
                         >
                             {isLoading ? (
                                 <>

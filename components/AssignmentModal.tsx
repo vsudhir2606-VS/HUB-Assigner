@@ -62,7 +62,7 @@ const AssignmentModal: React.FC<AssignmentModalProps> = ({ onAssign, onCancel, i
                         />
                     </div>
                      <div>
-                        <label htmlFor="special-names" className="block text-sm font-medium text-yellow-400 mb-2">Assignees for 'RU, UA, NI, VE, BY' Data</label>
+                        <label htmlFor="special-names" className="block text-sm font-medium text-yellow-400 mb-2">Assignees for 'RU, UA, NI, VE, BY, CU, IR, KP, SY' Data</label>
                         <textarea
                             id="special-names"
                             rows={2}
